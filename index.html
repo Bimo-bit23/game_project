@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
+<title>Tap-to-Fly — Game HTML5 (Single File)</title>
+<style>
+  /* ---------- Basic styling ---------- */
+  :root{
+    --bg:#70c5ce;
+    --ground:#dca34a;
+    --pipe:#2b8a4a;
+    --ui-bg:rgba(0,0,0,0.35);
+    --text:#ffffff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+  html,body{
+    height:100%;
+    margin:0;
+    background:linear-gradient(#70c5ce,#8bd1d9 60%, #dff7fb 100%);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select:none;
+    touch-action: manipulation;
+  }
+  #gameWrap{
+    position:relative;
+    width:100%;
+    height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+  }
+  canvas{
+    display:block;
+    background:transparent;
+    touch-action:none;
+    border-radius:12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    max-height:100vh;
+  }
+
+  /* UI overlay */
+  .ui {
+    position:absolute;
+    left:0; right:0;
+    pointer-events:none;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+  }
+  .topbar{
+    width:100%;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:12px;
+    box-sizing:border-box;
+    pointer-events:auto;
+  }
+  .scoreBox{
+    background:var(--ui-bg);
+    color:var(--text);
+    font-weight:700;
+    font-size:20px;
+    padding:8px 12px;
+    border-radius:10px;
+    margin-top:8px;
+  }
+  .centerOverlay{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    text-align:center;
+    color:var(--text);
+    pointer-events:auto;
+  }
+  .btn{
+    background:rgba(0,0,0,0.55);
+    color:var(--text);
+    padding:10px 16px;
+    border-radius:10px;
+    font-weight:700;
+    margin-top:8px;
+    display:inline-block;
+    cursor:pointer;
+    touch-action: manipulation;
+  }
+  .small{
+    padding:6px 9px;
+    font-size:14px;
+  }
+  .muted{
+    opacity:0.6;
+  }
+  .hidden{ display:none; }
+
+  /* Start / Game Over panels */
+  .panel{
+    background:rgba(255,255,255,0.03);
+    padding:18px;
+    border-radius:14px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+  }
+  h1{ margin:0; font-size:28px; letter-spacing:1px;}
+  p{ margin:6px 0 0 0; font-size:15px; color:rgba(255,255,255,0.95) }
+  .footerNote{ position:absolute; bottom:12px; left:12px; color:rgba(255,255,255,0.7); font-size:12px; }
+
+  /* Make sure touch targets big enough */
+  @media (max-width:420px){
+    .scoreBox{ font-size:18px; padding:10px 14px; }
+    .btn{ padding:12px 18px; font-size:16px; border-radius:12px; }
+    h1{ font-size:24px; }
+  }
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <canvas id="gameCanvas" role="img" aria-label="Tap to fly game"></canvas>
+
+  <div class="ui" style="width:100%;">
+    <div class="topbar">
+      <div id="leftControls" style="display:flex; gap:8px; align-items:center; pointer-events:auto;">
+        <div id="pauseBtn" class="btn small">Pause</div>
+        <div id="muteBtn" class="btn small">Mute</div>
+      </div>
+      <div id="scoreDisplay" class="scoreBox">Score: 0</div>
+    </div>
+
+    <div id="centerOver" class="centerOverlay">
+      <!-- Start Screen -->
+      <div id="startPanel" class="panel">
+        <h1>Tap-to-Fly</h1>
+        <p>Tap layar untuk terbang. Lewati pipa sebanyak mungkin.</p>
+        <div style="display:flex; gap:8px; margin-top:12px; justify-content:center;">
+          <div id="startBtn" class="btn">Start</div>
+          <div id="howBtn" class="btn small">Instruksi</div>
+        </div>
+      </div>
+
+      <div id="howPanel" class="panel hidden">
+        <h1>Instruksi</h1>
+        <p>Ketuk/klik atau tekan Space/ArrowUp untuk flap. Tekan M untuk mute, H untuk toggle hitbox debug.</p>
+        <div class="btn" id="howBack">Kembali</div>
+      </div>
+
+      <!-- Overlay saat playing (tap to start) -->
+      <div id="tapOverlay" class="panel hidden">
+        <p style="font-weight:700; font-size:18px; margin-bottom:8px;">Tap untuk mulai</p>
+        <p style="font-size:13px">Gunakan sentuhan di layar atau Space pada keyboard.</p>
+      </div>
+
+      <!-- Game Over -->
+      <div id="gameOverPanel" class="panel hidden">
+        <h1>Game Over</h1>
+        <p id="finalScore">Skor: 0</p>
+        <p id="hiScore">High Score: 0</p>
+        <div style="display:flex; gap:10px; margin-top:10px; justify-content:center;">
+          <div id="retryBtn" class="btn">Retry</div>
+          <div id="menuBtn" class="btn small">Menu</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footerNote">H = hitbox, M = mute</div>
+  </div>
+</div>
+
+<script>
+/*
+  Tap-to-Fly single-file game
+  - Cara jalankan: simpan file ini sebagai .html, buka di browser (mobile recommended).
+  - Tombol dev: H -> toggle hitbox debug, M -> mute/unmute
+  - Keyboard: Space / ArrowUp -> flap, H, M
+  - Touch: ketuk/tap layar untuk flap / start
+*/
+
+/* =========================
+   CONFIG (mudah diubah)
+   ========================= */
+const CONFIG = {
+  WIDTH: 360,                // logical canvas width (will scale to DPR)
+  HEIGHT: 640,               // logical canvas height (portrait)
+  DPR_SAFE: true,            // scale for devicePixelRatio
+  GRAVITY: 0.6,              // px/frame^2
+  FLAP_VELOCITY: -10,        // px/frame
+  MAX_FALL_SPEED: 15,
+  MAX_UPWARD_SPEED: -12,
+  PIPE_SPEED: 2.5,           // px/frame
+  PIPE_GAP: 140,             // px (will scale)
+  PIPE_WIDTH: 56,
+  SPAWN_INTERVAL: 1500,      // ms
+  GROUND_HEIGHT: 90,         // px from bottom
+  BIRD_SIZE: 34,             // logical px
+  BIRD_X: 90,                // fixed x pos
+  ROTATION_MAX: 25,          // degree when going up
+  ROTATION_MIN: -80,         // degree when diving
+  SCORE_PADDING: 18
+};
+
+
+/* =========================
+   Global state & elements
+   ========================= */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('gameWrap');
+
+const startBtn = document.getElementById('startBtn');
+const howBtn = document.getElementById('howBtn');
+const howBack = document.getElementById('howBack');
+const startPanel = document.getElementById('startPanel');
+const howPanel = document.getElementById('howPanel');
+const tapOverlay = document.getElementById('tapOverlay');
+const gameOverPanel = document.getElementById('gameOverPanel');
+const finalScoreEl = document.getElementById('finalScore');
+const hiScoreEl = document.getElementById('hiScore');
+const retryBtn = document.getElementById('retryBtn');
+const menuBtn = document.getElementById('menuBtn');
+const scoreDisplay = document.getElementById('scoreDisplay');
+const pauseBtn = document.getElementById('pauseBtn');
+const muteBtn = document.getElementById('muteBtn');
+
+let DPR = 1;
+let lastTimestamp = 0;
+let accum = 0;
+let spawnTimer = 0;
+
+let gameState = 'menu'; // menu, ready, playing, paused, over
+let isMuted = false;
+let debugHitboxes = false;
+
+/* localStorage safe */
+let localHighScore = 0;
+try {
+  const stored = localStorage.getItem('tapfly_highscore');
+  localHighScore = stored ? parseInt(stored,10) : 0;
+} catch(e){ localHighScore = 0; }
+
+/* WebAudio for simple effects (fallback safe) */
+let audioCtx = null;
+try {
+  window.AudioContext = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AudioContext();
+} catch(e){ audioCtx = null; }
+
+const sounds = {
+  flap: {play:()=>playBeep(256,0.05,0.6)},
+  point: {play:()=>playBeep(880,0.06,0.9)},
+  hit: {play:()=>playBeep(80,0.15,0.9)}
+};
+
+function playBeep(freq=440,duration=0.1,gain=0.5){
+  if(isMuted || !audioCtx) return;
+  try {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.frequency.value = freq;
+    o.type = 'sine';
+    g.gain.value = gain;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime + duration);
+    o.stop(audioCtx.currentTime + duration + 0.02);
+  } catch(e){}
+}
+
+/* =========================
+   Game objects
+   ========================= */
+
+/* Bird */
+class Bird {
+  constructor(){
+    this.reset();
+  }
+  reset(){
+    this.x = CONFIG.BIRD_X;
+    this.y = CONFIG.HEIGHT/2;
+    this.vy = 0;
+    this.size = CONFIG.BIRD_SIZE;
+    this.frame = 0; // wing animation frame 0-2
+    this.frameTimer = 0;
+    this.alive = true;
+    this.rotation = 0; // degrees
+  }
+  flap(){
+    this.vy = Math.max(CONFIG.MAX_UPWARD_SPEED, Math.min(CONFIG.FLAP_VELOCITY, CONFIG.FLAP_VELOCITY));
+    this.frame = 1;
+    this.frameTimer = 0;
+    sounds.flap.play();
+  }
+  update(dt){
+    // physics
+    this.vy += CONFIG.GRAVITY;
+    if(this.vy > CONFIG.MAX_FALL_SPEED) this.vy = CONFIG.MAX_FALL_SPEED;
+    this.y += this.vy;
+
+    // rotation based on vy
+    const t = (this.vy - CONFIG.MAX_UPWARD_SPEED) / (CONFIG.MAX_FALL_SPEED - CONFIG.MAX_UPWARD_SPEED);
+    this.rotation = Math.max(CONFIG.ROTATION_MIN, Math.min(CONFIG.ROTATION_MAX, (1-t)*CONFIG.ROTATION_MAX + t*CONFIG.ROTATION_MIN));
+
+    // wing animation
+    this.frameTimer += dt;
+    if(this.frameTimer > 80){
+      this.frame = (this.frame + 1) % 3;
+      this.frameTimer = 0;
+    }
+  }
+  draw(ctx,scale){
+    ctx.save();
+    ctx.translate(this.x*scale, this.y*scale);
+    ctx.rotate(this.rotation * Math.PI / 180);
+    const s = this.size * scale;
+    // body
+    ctx.fillStyle = '#ffd24a';
+    ctx.beginPath();
+    ctx.ellipse(0,0, s*0.6, s*0.45, 0, 0, Math.PI*2);
+    ctx.fill();
+    // eye
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(s*0.15, -s*0.05, s*0.08, 0, Math.PI*2);
+    ctx.fill();
+    // beak
+    ctx.fillStyle = '#ff7b2d';
+    ctx.beginPath();
+    ctx.moveTo(s*0.5,0);
+    ctx.lineTo(s*0.8, -s*0.06);
+    ctx.lineTo(s*0.8, s*0.06);
+    ctx.closePath();
+    ctx.fill();
+    // wing simple frame animation
+    ctx.fillStyle = '#e8a826';
+    ctx.beginPath();
+    const wingY = (this.frame === 0) ? -s*0.05 : (this.frame === 1 ? -s*0.2 : 0);
+    ctx.ellipse(-s*0.06, wingY, s*0.3, s*0.14, -0.6, 0, Math.PI*2);
+    ctx.fill();
+
+    if(debugHitboxes){
+      ctx.strokeStyle='rgba(255,0,0,0.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-s*0.6,-s*0.45,s*1.2,s*0.9);
+    }
+
+    ctx.restore();
+  }
+  getBounds(){
+    const s = this.size;
+    return {
+      x: this.x - s*0.6,
+      y: this.y - s*0.45,
+      w: s*1.2,
+      h: s*0.9
+    };
+  }
+}
+
+/* Pipe pair */
+class Pipe {
+  constructor(x, gapY){
+    this.x = x;
+    this.width = CONFIG.PIPE_WIDTH;
+    this.gapY = gapY; // center y of gap
+    this.passed = false;
+  }
+  update(dt){
+    this.x -= CONFIG.PIPE_SPEED;
+  }
+  draw(ctx, scale, canvasH){
+    const w = this.width * scale;
+    const gap = CONFIG.PIPE_GAP * scale;
+    const topH = this.gapY - gap/2;
+    const bottomY = this.gapY + gap/2;
+    ctx.fillStyle = CONFIG_PIPE_COLOR;
+    // top pipe
+    ctx.fillStyle = '#2b8a4a';
+    ctx.fillRect(this.x*scale, 0, w, topH*scale);
+    // bottom pipe
+    ctx.fillRect(this.x*scale, bottomY*scale, w, (canvasH/scale - bottomY)*scale);
+    // rim detail
+    ctx.fillStyle = '#1f5e37';
+    ctx.fillRect(this.x*scale, Math.max(0, topH*scale - 8), w, 8);
+    ctx.fillRect(this.x*scale, bottomY*scale, w, 8);
+
+    if(debugHitboxes){
+      ctx.strokeStyle='rgba(255,255,0,0.9)';
+      ctx.lineWidth=2;
+      // top rect
+      ctx.strokeRect(this.x*scale,0,w,topH*scale);
+      ctx.strokeRect(this.x*scale, bottomY*scale, w, (canvasH/scale - bottomY)*scale);
+    }
+  }
+  getTopBounds(){
+    const gap = CONFIG.PIPE_GAP;
+    const topH = this.gapY - gap/2;
+    return {x:this.x, y:0, w:this.width, h:topH};
+  }
+  getBottomBounds(){
+    const gap = CONFIG.PIPE_GAP;
+    const bottomY = this.gapY + gap/2;
+    return {x:this.x, y:bottomY, w:this.width, h:CONFIG.HEIGHT - bottomY};
+  }
+}
+
+/* =========================
+   Helpers & variables
+   ========================= */
+
+const bird = new Bird();
+let pipes = [];
+let score = 0;
+let lastSpawn = 0;
+
+/* color constant (kept outside class so easier to change) */
+const CONFIG_PIPE_COLOR = '#2b8a4a';
+
+/* utility collision AABB */
+function aabbIntersect(a,b){
+  return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
+}
+
+/* reset game */
+function resetGame(){
+  bird.reset();
+  pipes = [];
+  score = 0;
+  lastSpawn = performance.now();
+  spawnTimer = 0;
+  gameState = 'ready';
+  updateScoreUI();
+  tapOverlay.classList.remove('hidden');
+  gameOver
